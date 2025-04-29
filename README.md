@@ -54,3 +54,26 @@ tool to get securioty and vulnerabiliy infos for images from external quay regis
 *   **URL Parsing:** Handles the specific `quay.io/repo/path:tag` format and includes basic validation. It correctly constructs the API URLs using the repository path.
 
 This tool should effectively meet the requirements for querying Quay.io vulnerability data from the command line.
+
+
+## Structure
+
+```
+    quay-scanner/
+    ├── go.mod
+    ├── go.sum
+    ├── cmd/
+    │   └── quay-scanner/
+    │       └── main.go         # Main application entry point, CLI parsing, orchestration
+    ├── internal/
+    │   ├── quay/
+    │   │   ├── client.go       # Quay API client logic (requests, response handling)
+    │   │   └── types.go        # Struct definitions for Quay API responses
+    │   └── formatter/
+    │       └── formatter.go    # Output formatting logic (JSON, human-readable)
+    └── README.md               # (Optional but recommended)
+```
+
+# container
+
+[![Docker Repository on Quay](https://quay.io/repository/ocptools/cluster-resources/status "Docker Repository on Quay")](https://quay.io/repository/ocptools/cluster-resources)

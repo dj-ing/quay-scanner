@@ -1,0 +1,25 @@
+ Git files
+.git/
+.gitignore
+
+# Go build cache/modules (downloaded inside container)
+vendor/
+*.exe
+*.test
+*.out
+
+# Local build artifacts
+quay-scanner
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Configuration/Secrets/Results (should not be in image)
+*.yaml
+*.json
+*.token
+results.*
+
+# Documentation
+*.md
