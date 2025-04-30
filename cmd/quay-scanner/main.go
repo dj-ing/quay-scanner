@@ -15,38 +15,56 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	// Import the new config package
+	"quay-scanner/internal/config"
 	"quay-scanner/internal/formatter"
 	"quay-scanner/internal/quay"
 )
 
-const defaultWorkers = 5 // Default number of concurrent workers
+// --- Constants ---
+// const defaultWorkers = 5 // Keep this or move to config if desired
+const defaultConfigPath = "config/config.yaml" // Define default config path
 
-// Config holds the application configuration derived from flags and environment.
-type Config struct {
+// CliConfig holds configuration derived ONLY from flags and environment variables
+// Renamed from Config to avoid clash with AppConfig
+type CliConfig struct {
 	ImageURL     string
 	InputFile    string
 	OutputFormat string
 	Verbose      bool
 	Token        string
 	NumWorkers   int
+	ConfigFile   string // Add flag for custom config file path
 }
 
 // --- Main Execution Flow ---
 
 func main() {
-	// 1. Parse flags and initialize configuration
-	cfg, err := parseFlagsAndConfig()
+	// 1. Parse flags and initialize CLI configuration
+	cliCfg, err := parseFlags() // Renamed function
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
-		flag.Usage() // Show usage on config error
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	// 2. Setup logging based on configuration
-	setupLogging(cfg.Verbose)
+	// 2. Setup logging based on CLI configuration
+	setupLogging(cliCfg.Verbose)
 
-	// 3. Load the list of image URLs to process
-	imageURLs, err := loadImageURLs(cfg)
+	// 3. Load application configuration from file
+	appCfg, err := config.LoadConfig(cliCfg.ConfigFile) // Use path from flag
+	if err != nil {
+		// LoadConfig now only returns error on read/parse failure
+		// File not found is handled internally with defaults/warnings
+		fmt.Fprintf(os.Stderr, "Error processing configuration file '%s': %v\n", cliCfg.ConfigFile, err)
+		os.Exit(1) // Exit if config file is present but invalid
+	}
+	log.Printf("INFO: Using Quay API Base URL: %s", appCfg.Quay.APIBaseURL)
+	log.Printf("INFO: Using HTTP Timeout: %v", appCfg.Quay.GetTimeout())
+	log.Printf("INFO: Using User-Agent: %s", appCfg.Quay.UserAgent)
+
+	// 4. Load the list of image URLs to process (using CLI config)
+	imageURLs, err := loadImageURLs(cliCfg) // Pass CLI config
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading image URLs: %v\n", err)
 		os.Exit(1)
@@ -57,21 +75,26 @@ func main() {
 	}
 	log.Printf("INFO: Preparing to process %d image(s).\n", len(imageURLs))
 
-	// 4. Create the Quay API client
-	quayClient, err := quay.NewClient("", cfg.Token) // Use default base URL
+	// 5. Create the Quay API client using merged config (App Cfg + CLI Cfg)
+	quayClient, err := quay.NewClient(
+		appCfg.Quay.APIBaseURL,   // From config file
+		cliCfg.Token,             // From flag/env
+		appCfg.Quay.GetTimeout(), // From config file
+		appCfg.Quay.UserAgent,    // From config file
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating Quay client: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 5. Run the worker pool to process images concurrently
-	log.Printf("INFO: Starting vulnerability scan with %d workers...\n", cfg.NumWorkers)
-	results := runWorkerPool(imageURLs, quayClient, cfg.NumWorkers)
+	// 6. Run the worker pool to process images concurrently
+	log.Printf("INFO: Starting vulnerability scan with %d workers...\n", cliCfg.NumWorkers)
+	results := runWorkerPool(imageURLs, quayClient, cliCfg.NumWorkers)
 	log.Println("INFO: Vulnerability scan finished.")
 
-	// 6. Format and output the results
-	log.Printf("INFO: Formatting output as %s...\n", cfg.OutputFormat)
-	err = outputResults(results, cfg.OutputFormat, os.Stdout)
+	// 7. Format and output the results
+	log.Printf("INFO: Formatting output as %s...\n", cliCfg.OutputFormat)
+	err = outputResults(results, cliCfg.OutputFormat, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error formatting output: %v\n", err)
 		os.Exit(1)
@@ -82,25 +105,30 @@ func main() {
 
 // --- Helper Functions ---
 
-// parseFlagsAndConfig defines flags, parses them, validates, and returns a Config struct.
-func parseFlagsAndConfig() (Config, error) {
-	cfg := Config{}
+// parseFlags defines flags, parses them, validates, and returns a CliConfig struct.
+// Renamed from parseFlagsAndConfig
+func parseFlags() (CliConfig, error) {
+	cfg := CliConfig{} // Use CliConfig struct now
 	// Define flags
 	flag.StringVar(&cfg.ImageURL, "image", "", "Single Quay.io image URL (mutually exclusive with -file)")
 	flag.StringVar(&cfg.InputFile, "file", "", "Path to JSON or YAML file containing a list of image URLs (mutually exclusive with -image)")
 	flag.StringVar(&cfg.OutputFormat, "format", "human", "Output format: 'json' or 'human'")
 	flag.BoolVar(&cfg.Verbose, "verbose", false, "Enable verbose logging")
 	flag.StringVar(&cfg.Token, "token", "", "Quay API Bearer Token (optional, overrides QUAY_TOKEN env var)")
-	flag.IntVar(&cfg.NumWorkers, "workers", defaultWorkers, "Number of concurrent workers")
+	flag.IntVar(&cfg.NumWorkers, "workers", 5, "Number of concurrent workers (default: 5)")                                  // Set default here
+	flag.StringVar(&cfg.ConfigFile, "config", defaultConfigPath, "Path to the application configuration file (config.yaml)") // Add config flag
 
-	// Custom usage message
+	// Custom usage message (update if needed)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "\nUsage: %s [options]\n\n", path.Base(os.Args[0]))
+		// ... (keep usage message, maybe add info about -config flag) ...
+		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", path.Base(os.Args[0]))
 		fmt.Fprintf(os.Stderr, "Queries Quay.io for vulnerability information for one or more images.\n\n")
 		fmt.Fprintf(os.Stderr, "Input:\n")
-		fmt.Fprintf(os.Stderr, "  Provide either -image for a single image OR -file for multiple images.\n\n")
-		fmt.Fprintf(os.Stderr, "  Input file format (JSON): \n  |  {\"images\": [\"quay.io/ns/repo:tag\", ...]}}\n\n")
-		fmt.Fprintf(os.Stderr, "  Input file format (YAML): \n  |  images:\n  |  - quay.io/ns/repo:tag\n  |  - ...\n\n")
+		fmt.Fprintf(os.Stderr, "  Provide either -image for a single image OR -file for multiple images.\n")
+		fmt.Fprintf(os.Stderr, "  Input file format (JSON): {\"images\": [\"quay.io/ns/repo:tag\", ...]}}\n")
+		fmt.Fprintf(os.Stderr, "  Input file format (YAML): images:\n    - quay.io/ns/repo:tag\n    - ...\n\n")
+		fmt.Fprintf(os.Stderr, "Configuration:\n")
+		fmt.Fprintf(os.Stderr, "  Uses settings from the file specified by -config (default: %s).\n", defaultConfigPath)
 		fmt.Fprintf(os.Stderr, "Authentication:\n")
 		fmt.Fprintf(os.Stderr, "  Uses QUAY_TOKEN environment variable or -token flag.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
@@ -127,89 +155,98 @@ func parseFlagsAndConfig() (Config, error) {
 	// Handle token precedence (flag > env var)
 	if cfg.Token == "" {
 		cfg.Token = os.Getenv("QUAY_TOKEN")
+		if cfg.Token != "" && cfg.Verbose { // Only log token source if verbose
+			log.Println("INFO: Using token from QUAY_TOKEN environment variable.")
+		}
+	} else {
+		if cfg.Verbose {
+			log.Println("INFO: Using token from -token flag.")
+		}
 	}
+	// Warning about missing token moved to where client is created or used if needed
 
 	return cfg, nil
 }
 
-// setupLogging configures the global logger based on verbosity.
+// setupLogging remains the same
 func setupLogging(verbose bool) {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	if !verbose {
-		log.SetOutput(io.Discard) // Disable logging if not verbose
+		log.SetOutput(io.Discard)
 	} else {
 		log.SetOutput(os.Stderr)
 		log.Println("Verbose logging enabled.")
 	}
 }
 
-// loadImageURLs determines the list of image URLs from either the -image flag or the -file flag.
-func loadImageURLs(cfg Config) ([]string, error) {
-	if cfg.ImageURL != "" {
-		log.Printf("INFO: Processing single image: %s\n", cfg.ImageURL)
-		return []string{cfg.ImageURL}, nil
+// loadImageURLs now takes CliConfig
+func loadImageURLs(cliCfg CliConfig) ([]string, error) {
+	if cliCfg.ImageURL != "" {
+		log.Printf("INFO: Processing single image: %s\n", cliCfg.ImageURL)
+		return []string{cliCfg.ImageURL}, nil
 	}
 
-	log.Printf("INFO: Reading image list from file: %s\n", cfg.InputFile)
-	fileContent, err := os.ReadFile(cfg.InputFile)
+	log.Printf("INFO: Reading image list from file: %s\n", cliCfg.InputFile)
+	// Use absolute path for clarity in logs/errors
+	absPath, err := filepath.Abs(cliCfg.InputFile)
 	if err != nil {
-		return nil, fmt.Errorf("reading input file '%s': %w", cfg.InputFile, err)
+		log.Printf("Warning: Could not determine absolute path for input file '%s': %v", cliCfg.InputFile, err)
+		absPath = cliCfg.InputFile // Use original path if abs fails
+	}
+
+	fileContent, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading input file '%s': %w", absPath, err)
 	}
 
 	var inputList quay.InputImageList
-	fileExt := strings.ToLower(filepath.Ext(cfg.InputFile))
+	fileExt := strings.ToLower(filepath.Ext(cliCfg.InputFile))
 
 	switch fileExt {
 	case ".json":
 		err = json.Unmarshal(fileContent, &inputList)
 		if err != nil {
-			return nil, fmt.Errorf("parsing JSON file '%s': %w", cfg.InputFile, err)
+			return nil, fmt.Errorf("parsing JSON file '%s': %w", absPath, err)
 		}
 	case ".yaml", ".yml":
 		err = yaml.Unmarshal(fileContent, &inputList)
 		if err != nil {
-			return nil, fmt.Errorf("parsing YAML file '%s': %w", cfg.InputFile, err)
+			return nil, fmt.Errorf("parsing YAML file '%s': %w", absPath, err)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported file extension '%s'. Use .json, .yaml, or .yml", fileExt)
+		return nil, fmt.Errorf("unsupported file extension '%s' for input file '%s'. Use .json, .yaml, or .yml", fileExt, absPath)
 	}
 
 	if inputList.Images == nil {
-		// Handle case where file is valid YAML/JSON but `images` key is missing or null
-		return []string{}, nil // Return empty slice, main checks for zero length
+		return []string{}, nil
 	}
 
-	log.Printf("INFO: Found %d images to process from file.\n", len(inputList.Images))
+	log.Printf("INFO: Found %d images to process from file '%s'.\n", len(inputList.Images), absPath)
 	return inputList.Images, nil
 }
 
-// runWorkerPool sets up and executes the concurrent image processing.
+// runWorkerPool remains the same conceptually
 func runWorkerPool(imageURLs []string, quayClient *quay.Client, numWorkers int) map[string]quay.ImageScanResult {
+	// ... (implementation is unchanged) ...
 	numJobs := len(imageURLs)
 	jobs := make(chan string, numJobs)
 	results := make(chan quay.ImageScanResult, numJobs)
 	allResults := make(map[string]quay.ImageScanResult, numJobs)
 	var wg sync.WaitGroup
 
-	// Start workers
 	log.Printf("INFO: Starting %d workers...\n", numWorkers)
 	for w := 1; w <= numWorkers; w++ {
 		wg.Add(1)
-		// Pass a copy of the client to each worker (Client is safe for concurrent use)
 		go worker(w, quayClient, jobs, results, &wg)
 	}
 
-	// Send jobs to workers
 	log.Println("INFO: Sending jobs to workers...")
 	for _, url := range imageURLs {
 		jobs <- url
 	}
-	close(jobs) // Indicate no more jobs will be sent
+	close(jobs)
 	log.Println("INFO: All jobs sent.")
 
-	// Collect results
-	// Start a separate goroutine to collect results to avoid blocking main
-	// while waiting for workers with wg.Wait()
 	var collectWg sync.WaitGroup
 	collectWg.Add(1)
 	go func() {
@@ -218,26 +255,23 @@ func runWorkerPool(imageURLs []string, quayClient *quay.Client, numWorkers int) 
 		for i := 0; i < numJobs; i++ {
 			result := <-results
 			allResults[result.ImageURL] = result
-			// Optional: Add progress logging here if needed
-			// log.Printf("INFO: Collected result %d/%d for %s\n", i+1, numJobs, result.ImageURL)
 		}
 		log.Println("INFO: All results collected.")
 	}()
 
-	// Wait for all workers to finish processing
 	log.Println("INFO: Waiting for workers to complete...")
 	wg.Wait()
 	log.Println("INFO: All workers finished processing.")
 
-	// Wait for the result collection goroutine to finish
 	collectWg.Wait()
-	close(results) // Close results channel after collection is done
+	close(results)
 
 	return allResults
 }
 
-// worker is the goroutine function that processes jobs from the jobs channel.
+// worker remains the same
 func worker(id int, quayClient *quay.Client, jobs <-chan string, results chan<- quay.ImageScanResult, wg *sync.WaitGroup) {
+	// ... (implementation is unchanged) ...
 	defer wg.Done()
 	for imageURL := range jobs {
 		log.Printf("INFO: [Worker %d] Processing image: %s\n", id, imageURL)
@@ -248,8 +282,9 @@ func worker(id int, quayClient *quay.Client, jobs <-chan string, results chan<- 
 	log.Printf("INFO: [Worker %d] Exiting.\n", id)
 }
 
-// processImage handles the logic for scanning a single image.
+// processImage remains the same
 func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult {
+	// ... (implementation is unchanged) ...
 	result := quay.ImageScanResult{ImageURL: imageURL}
 
 	repo, tag, err := parseImageURL(imageURL)
@@ -263,17 +298,15 @@ func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult
 		result.Error = fmt.Sprintf("Getting image ID failed: %v", err)
 		return result
 	}
-
-	// Add check for empty imageID which can happen for non-existent tags
 	if imageID == "" {
-		result.Error = fmt.Sprintf("Could not find image ID for tag '%s' (tag might not exist)", tag)
+		// This case should be handled by GetImageID returning an error now
+		result.Error = fmt.Sprintf("Could not find image ID for tag '%s' (tag might not exist or image details missing)", tag)
 		return result
 	}
 
 	report, err := quayClient.GetVulnerabilities(repo, imageID)
 	if err != nil {
 		result.Error = fmt.Sprintf("Getting vulnerabilities failed: %v", err)
-		// Still include report status if available despite error (e.g., 404 on vuln scan)
 		if report != nil {
 			result.Report = report
 		}
@@ -284,9 +317,9 @@ func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult
 	return result
 }
 
-// parseImageURL extracts repository and tag from a quay.io URL.
-// (Kept separate as it's a distinct parsing task)
+// parseImageURL remains the same
 func parseImageURL(imageURL string) (repo string, tag string, err error) {
+	// ... (implementation is unchanged) ...
 	if !strings.HasPrefix(imageURL, "quay.io/") {
 		err = fmt.Errorf("image URL must start with 'quay.io/'")
 		return
@@ -299,7 +332,6 @@ func parseImageURL(imageURL string) (repo string, tag string, err error) {
 	}
 	repo = parts[0]
 	tag = parts[1]
-	// Basic validation against path traversal or invalid chars
 	if strings.Contains(repo, "..") || strings.Contains(tag, "..") || strings.Contains(tag, "/") {
 		err = fmt.Errorf("invalid characters in repository or tag")
 		return
@@ -307,8 +339,9 @@ func parseImageURL(imageURL string) (repo string, tag string, err error) {
 	return repo, tag, nil
 }
 
-// outputResults formats and prints the collected results.
+// outputResults remains the same
 func outputResults(results map[string]quay.ImageScanResult, format string, writer io.Writer) error {
+	// ... (implementation is unchanged) ...
 	switch format {
 	case "json":
 		err := formatter.FormatJSON(writer, results)
@@ -316,10 +349,8 @@ func outputResults(results map[string]quay.ImageScanResult, format string, write
 			return fmt.Errorf("formatting JSON output: %w", err)
 		}
 	case "human":
-		// FormatHumanReadable doesn't return an error in its current signature
 		formatter.FormatHumanReadable(writer, results)
 	default:
-		// This case should ideally be caught during flag validation
 		return fmt.Errorf("internal error: unknown output format '%s'", format)
 	}
 	return nil

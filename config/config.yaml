@@ -1,0 +1,10 @@
+# config/config.yaml
+quay:
+  # The base URL for the Quay v1 API
+  api_base_url: "https://quay.io/api/v1/"
+
+  # HTTP client timeout in seconds
+  timeout_seconds: 20 # Example: Increased timeout
+
+  # User-Agent string for HTTP requests
+  user_agent: "MyCustom-QuayScanner/1.0"

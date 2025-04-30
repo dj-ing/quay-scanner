@@ -1,0 +1,9 @@
+{
+  "images": [
+    "quay.io/coreos/etcd:v3.5.20",
+    "quay.io/prometheus/prometheus:v2.45.0",
+    "quay.io/coreos/flannel:v0.20.2",
+    "quay.io/coreos/etcd:nonexistent-tag",
+    "invalid-url"
+  ]
+}
