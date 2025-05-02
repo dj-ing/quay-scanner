@@ -122,16 +122,16 @@ func parseFlags() (CliConfig, error) {
 	flag.Usage = func() {
 		// ... (keep usage message, maybe add info about -config flag) ...
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", path.Base(os.Args[0]))
-		fmt.Fprintf(os.Stderr, "Queries Quay.io for vulnerability information for one or more images.\n\n")
-		fmt.Fprintf(os.Stderr, "Input:\n")
-		fmt.Fprintf(os.Stderr, "  Provide either -image for a single image OR -file for multiple images.\n")
-		fmt.Fprintf(os.Stderr, "  Input file format (JSON): {\"images\": [\"quay.io/ns/repo:tag\", ...]}}\n")
-		fmt.Fprintf(os.Stderr, "  Input file format (YAML): images:\n    - quay.io/ns/repo:tag\n    - ...\n\n")
-		fmt.Fprintf(os.Stderr, "Configuration:\n")
+		fmt.Fprintf(os.Stderr, "Queries Quay.io for vulnerability information for one or more images.\n")
+		fmt.Fprintf(os.Stderr, "\nInput:\n")
+		fmt.Fprintf(os.Stderr, "  Provide either -image for a single image OR -file for multiple images.\n\n")
+		fmt.Fprintf(os.Stderr, "  Input file format (JSON):\n  | {\"images\": [\"quay.io/ns/repo:tag\", ...]}}\n\n")
+		fmt.Fprintf(os.Stderr, "  Input file format (YAML):\n  | images:\n  |    - quay.io/ns/repo:tag\n  |    - ...\n\n")
+		fmt.Fprintf(os.Stderr, "\nConfiguration:\n")
 		fmt.Fprintf(os.Stderr, "  Uses settings from the file specified by -config (default: %s).\n", defaultConfigPath)
-		fmt.Fprintf(os.Stderr, "Authentication:\n")
+		fmt.Fprintf(os.Stderr, "\nAuthentication:\n")
 		fmt.Fprintf(os.Stderr, "  Uses QUAY_TOKEN environment variable or -token flag.\n\n")
-		fmt.Fprintf(os.Stderr, "Options:\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
 		flag.PrintDefaults()
 	}
 
