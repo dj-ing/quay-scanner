@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"quay-scanner/internal/config"
 
 	// "net/http/httputil" // Keep if needed for debugging
 	"net/url"
@@ -66,13 +67,18 @@ func NewClient(baseURL string, token string, timeout time.Duration, userAgent st
 }
 
 // doRequest performs an HTTP request and decodes the JSON response.
-func (c *Client) doRequest(method, path string, target interface{}) error {
+func (c *Client) doRequest(method, path string, target interface{}, cfg config.CliConfig) error {
 	relURL, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("invalid API path %q: %w", path, err)
 	}
 	fullURL := c.BaseURL.ResolveReference(relURL)
-
+	if cfg.Verbose {
+		log.Printf("INFO: Making %s request to %s", method, fullURL)
+	}
+	if cfg.Verbose {
+		log.Println("INFO: Using token from -token flag.")
+	}
 	req, err := http.NewRequest(method, fullURL.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request for %s: %w", fullURL, err)
@@ -108,11 +114,11 @@ func (c *Client) doRequest(method, path string, target interface{}) error {
 
 // GetImageID fetches the image digest (SHA) for a given repo and tag.
 // ... (no changes needed in GetImageID itself) ...
-func (c *Client) GetImageID(repo, tag string) (string, error) {
+func (c *Client) GetImageID(repo, tag string, cfg config.CliConfig) (string, error) {
 	// ... existing implementation ...
 	path := fmt.Sprintf("repository/%s/tag/%s", repo, url.PathEscape(tag))
 	var tagDetail TagDetail
-	err := c.doRequest("GET", path, &tagDetail)
+	err := c.doRequest("GET", path, &tagDetail, cfg)
 	if err != nil {
 		// Check for 404 specifically, might indicate tag not found
 		if strings.Contains(err.Error(), "status 404") {
@@ -134,11 +140,11 @@ func (c *Client) GetImageID(repo, tag string) (string, error) {
 
 // GetVulnerabilities fetches the security report for a given repo and image digest.
 // ... (no changes needed in GetVulnerabilities itself) ...
-func (c *Client) GetVulnerabilities(repo, imageDigest string) (*SecurityReport, error) {
+func (c *Client) GetVulnerabilities(repo, imageDigest string, cfg config.CliConfig) (*SecurityReport, error) {
 	// ... existing implementation ...
 	path := fmt.Sprintf("repository/%s/image/%s/security?vulnerabilities=true", repo, imageDigest)
 	var report SecurityReport
-	err := c.doRequest("GET", path, &report)
+	err := c.doRequest("GET", path, &report, cfg)
 	if err != nil {
 		// Check for 404 specifically, might indicate image digest not found or no scan data
 		if strings.Contains(err.Error(), "status 404") {

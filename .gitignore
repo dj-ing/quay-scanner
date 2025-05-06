@@ -26,3 +26,5 @@ _testmain.go
 
 quay-scanner
 nohup*
+
+nohup.out

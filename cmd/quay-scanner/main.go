@@ -25,18 +25,6 @@ import (
 // const defaultWorkers = 5 // Keep this or move to config if desired
 const defaultConfigPath = "config/config.yaml" // Define default config path
 
-// CliConfig holds configuration derived ONLY from flags and environment variables
-// Renamed from Config to avoid clash with AppConfig
-type CliConfig struct {
-	ImageURL     string
-	InputFile    string
-	OutputFormat string
-	Verbose      bool
-	Token        string
-	NumWorkers   int
-	ConfigFile   string // Add flag for custom config file path
-}
-
 // --- Main Execution Flow ---
 
 func main() {
@@ -89,7 +77,7 @@ func main() {
 
 	// 6. Run the worker pool to process images concurrently
 	log.Printf("INFO: Starting vulnerability scan with %d workers...\n", cliCfg.NumWorkers)
-	results := runWorkerPool(imageURLs, quayClient, cliCfg.NumWorkers)
+	results := runWorkerPool(imageURLs, quayClient, cliCfg)
 	log.Println("INFO: Vulnerability scan finished.")
 
 	// 7. Format and output the results
@@ -105,10 +93,10 @@ func main() {
 
 // --- Helper Functions ---
 
-// parseFlags defines flags, parses them, validates, and returns a CliConfig struct.
+// parseFlags defines flags, parses them, validates, and returns a config.CliConfig struct.
 // Renamed from parseFlagsAndConfig
-func parseFlags() (CliConfig, error) {
-	cfg := CliConfig{} // Use CliConfig struct now
+func parseFlags() (config.CliConfig, error) {
+	cfg := config.CliConfig{} // Use config.CliConfig struct now
 	// Define flags
 	flag.StringVar(&cfg.ImageURL, "image", "", "Single Quay.io image URL (mutually exclusive with -file)")
 	flag.StringVar(&cfg.InputFile, "file", "", "Path to JSON or YAML file containing a list of image URLs (mutually exclusive with -image)")
@@ -179,8 +167,8 @@ func setupLogging(verbose bool) {
 	}
 }
 
-// loadImageURLs now takes CliConfig
-func loadImageURLs(cliCfg CliConfig) ([]string, error) {
+// loadImageURLs now takes config.CliConfig
+func loadImageURLs(cliCfg config.CliConfig) ([]string, error) {
 	if cliCfg.ImageURL != "" {
 		log.Printf("INFO: Processing single image: %s\n", cliCfg.ImageURL)
 		return []string{cliCfg.ImageURL}, nil
@@ -226,7 +214,7 @@ func loadImageURLs(cliCfg CliConfig) ([]string, error) {
 }
 
 // runWorkerPool remains the same conceptually
-func runWorkerPool(imageURLs []string, quayClient *quay.Client, numWorkers int) map[string]quay.ImageScanResult {
+func runWorkerPool(imageURLs []string, quayClient *quay.Client, cfg config.CliConfig) map[string]quay.ImageScanResult {
 	// ... (implementation is unchanged) ...
 	numJobs := len(imageURLs)
 	jobs := make(chan string, numJobs)
@@ -234,10 +222,10 @@ func runWorkerPool(imageURLs []string, quayClient *quay.Client, numWorkers int) 
 	allResults := make(map[string]quay.ImageScanResult, numJobs)
 	var wg sync.WaitGroup
 
-	log.Printf("INFO: Starting %d workers...\n", numWorkers)
-	for w := 1; w <= numWorkers; w++ {
+	log.Printf("INFO: Starting %d workers...\n", cfg.NumWorkers)
+	for w := 1; w <= cfg.NumWorkers; w++ {
 		wg.Add(1)
-		go worker(w, quayClient, jobs, results, &wg)
+		go worker(w, quayClient, jobs, results, &wg, cfg)
 	}
 
 	log.Println("INFO: Sending jobs to workers...")
@@ -270,12 +258,12 @@ func runWorkerPool(imageURLs []string, quayClient *quay.Client, numWorkers int) 
 }
 
 // worker remains the same
-func worker(id int, quayClient *quay.Client, jobs <-chan string, results chan<- quay.ImageScanResult, wg *sync.WaitGroup) {
+func worker(id int, quayClient *quay.Client, jobs <-chan string, results chan<- quay.ImageScanResult, wg *sync.WaitGroup, cfg config.CliConfig) {
 	// ... (implementation is unchanged) ...
 	defer wg.Done()
 	for imageURL := range jobs {
 		log.Printf("INFO: [Worker %d] Processing image: %s\n", id, imageURL)
-		result := processImage(imageURL, quayClient)
+		result := processImage(imageURL, quayClient, cfg)
 		results <- result
 		log.Printf("INFO: [Worker %d] Finished image: %s (Error: %t)\n", id, imageURL, result.Error != "")
 	}
@@ -283,7 +271,7 @@ func worker(id int, quayClient *quay.Client, jobs <-chan string, results chan<- 
 }
 
 // processImage remains the same
-func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult {
+func processImage(imageURL string, quayClient *quay.Client, cfg config.CliConfig) quay.ImageScanResult {
 	// ... (implementation is unchanged) ...
 	result := quay.ImageScanResult{ImageURL: imageURL}
 
@@ -293,7 +281,7 @@ func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult
 		return result
 	}
 
-	imageID, err := quayClient.GetImageID(repo, tag)
+	imageID, err := quayClient.GetImageID(repo, tag, cfg)
 	if err != nil {
 		result.Error = fmt.Sprintf("Getting image ID failed: %v", err)
 		return result
@@ -304,7 +292,7 @@ func processImage(imageURL string, quayClient *quay.Client) quay.ImageScanResult
 		return result
 	}
 
-	report, err := quayClient.GetVulnerabilities(repo, imageID)
+	report, err := quayClient.GetVulnerabilities(repo, imageID, cfg)
 	if err != nil {
 		result.Error = fmt.Sprintf("Getting vulnerabilities failed: %v", err)
 		if report != nil {

@@ -10,6 +10,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CliConfig holds configuration derived ONLY from flags and environment variables
+// Renamed from Config to avoid clash with AppConfig
+type CliConfig struct {
+	ImageURL     string
+	InputFile    string
+	OutputFormat string
+	Verbose      bool
+	Token        string
+	NumWorkers   int
+	ConfigFile   string // Add flag for custom config file path
+}
+
 // QuayConfig holds settings specific to the Quay client
 type QuayConfig struct {
 	APIBaseURL     string `yaml:"api_base_url"`
